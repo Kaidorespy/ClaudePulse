@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ClaudePulse</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif;
+    background: linear-gradient(160deg, #0d1420 0%, #0b0f14 60%);
+    color: #e6edf3; overflow: hidden; user-select: none;
+  }
+  #titlebar {
+    height: 40px; display: flex; align-items: center; padding: 0 6px 0 16px;
+    -webkit-app-region: drag;
+  }
+  #titlebar .logo { display: flex; align-items: center; gap: 9px; font-weight: 600; font-size: 14px; letter-spacing: .3px; }
+  #titlebar .logo .dot { width: 9px; height: 9px; border-radius: 50%; background: #3b82f6; box-shadow: 0 0 8px #3b82f6; }
+  #titlebar .dot.stale { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+  #titlebar .dot.err { background: #ef4444; box-shadow: 0 0 8px #ef4444; }
+  #titlebar .spacer { flex: 1; }
+  .winBtn {
+    -webkit-app-region: no-drag; width: 36px; height: 30px; border: none; background: transparent;
+    color: #8b949e; font-size: 14px; cursor: pointer; border-radius: 6px;
+  }
+  .winBtn:hover { background: rgba(255,255,255,.08); color: #e6edf3; }
+
+  #scroll { height: calc(100% - 40px); overflow-y: auto; padding: 6px 18px 20px; }
+  #scroll::-webkit-scrollbar { width: 8px; }
+  #scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
+
+  .statusLine { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8b949e; margin: 4px 0 14px; }
+  .statusLine .spacer { flex: 1; }
+  .iconBtn {
+    background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: #c9d1d9;
+    border-radius: 8px; padding: 4px 12px; font-size: 12px; cursor: pointer; font-family: inherit;
+  }
+  .iconBtn:hover { background: rgba(255,255,255,.12); }
+
+  .card {
+    background: rgba(255,255,255,.035); border: 1px solid rgba(255,255,255,.07);
+    border-radius: 14px; padding: 16px; margin-bottom: 14px;
+    backdrop-filter: blur(10px);
+  }
+  .card h3 { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: #8b949e; margin-bottom: 12px; }
+
+  .limitRow { margin: 14px 0; }
+  .limitRow:first-of-type { margin-top: 2px; }
+  .limitTop { display: flex; align-items: baseline; gap: 10px; margin-bottom: 7px; }
+  .limitTop .name { font-size: 14px; font-weight: 600; }
+  .limitTop .reset { font-size: 11.5px; color: #8b949e; }
+  .limitTop .spacer { flex: 1; }
+  .limitTop .pct { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .track { height: 8px; border-radius: 4px; background: rgba(255,255,255,.09); overflow: hidden; }
+  .fill { height: 100%; border-radius: 4px; transition: width .7s cubic-bezier(.22,1,.36,1); }
+  .limitFoot { display: flex; margin-top: 7px; }
+  .limitFoot .spacer { flex: 1; }
+  .pinBtn {
+    background: transparent; border: 1px dashed rgba(255,255,255,.2); color: #8b949e;
+    border-radius: 7px; padding: 2px 10px; font-size: 11px; cursor: pointer; font-family: inherit;
+  }
+  .pinBtn:hover { color: #e6edf3; border-color: rgba(255,255,255,.45); }
+
+  .extraLine { font-size: 12px; color: #8b949e; margin-top: 4px; }
+  .extraLine b { color: #f59e0b; }
+
+  .wRow { display: flex; align-items: center; gap: 10px; padding: 7px 4px; font-size: 13px; border-bottom: 1px solid rgba(255,255,255,.05); }
+  .wRow:last-child { border-bottom: none; }
+  .wRow .spacer { flex: 1; }
+  .wRow label { display: flex; align-items: center; gap: 5px; font-size: 11.5px; color: #8b949e; cursor: pointer; }
+  .wRow .rm { background: transparent; border: none; color: #8b949e; cursor: pointer; font-size: 14px; border-radius: 5px; padding: 2px 7px; }
+  .wRow .rm:hover { background: rgba(239,68,68,.15); color: #ef4444; }
+  .noW { font-size: 12.5px; color: #58606a; padding: 4px; }
+
+  .setRow { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; }
+  .setRow .spacer { flex: 1; }
+  .setRow select, .setRow input[type=number] {
+    background: #161c26; border: 1px solid rgba(255,255,255,.12); color: #e6edf3;
+    border-radius: 7px; padding: 4px 8px; font-family: inherit; font-size: 12.5px; outline: none;
+  }
+  .setRow input[type=number] { width: 70px; }
+  .hintTxt { font-size: 11px; color: #58606a; margin-top: 8px; line-height: 1.6; }
+
+  .bigErr { text-align: center; padding: 30px 10px; color: #8b949e; font-size: 13.5px; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div id="titlebar">
+  <div class="logo"><span class="dot" id="statusDot"></span> ClaudePulse</div>
+  <span class="spacer"></span>
+  <button class="winBtn" id="btnMin">─</button>
+  <button class="winBtn" id="btnClose">✕</button>
+</div>
+<div id="scroll">
+  <div class="statusLine">
+    <span id="planTxt">Plan usage</span>
+    <span id="updatedTxt"></span>
+    <span class="spacer"></span>
+    <button class="iconBtn" id="btnRefresh">↻ refresh</button>
+    <button class="iconBtn" id="btnWeb" title="open claude.ai usage page">claude.ai ↗</button>
+  </div>
+
+  <div class="card"><h3>Usage limits</h3><div id="limits"></div><div id="extra"></div></div>
+
+  <div class="card"><h3>Pinned widgets</h3><div id="widgetList"></div></div>
+
+  <div class="card"><h3>Settings</h3>
+    <div class="setRow"><span>Poll every</span><input type="number" id="setPoll" min="30" step="30"><span>seconds</span></div>
+    <div class="setRow"><span>New widgets always-on-top</span><span class="spacer"></span><input type="checkbox" id="setTop"></div>
+    <div class="setRow"><span>Launch with Windows (to tray)</span><span class="spacer"></span><input type="checkbox" id="setStartup"></div>
+    <div class="setRow"><span>Widget · delete button</span><span class="spacer"></span>
+      <select id="setBindDelete"><option value="0">left click</option><option value="1">middle click</option><option value="2">right click</option></select>
+    </div>
+    <div class="setRow"><span>Widget · drag / resize button</span><span class="spacer"></span>
+      <select id="setBindDrag"><option value="0">left drag</option><option value="1">middle drag</option><option value="2">right drag</option></select>
+    </div>
+    <div class="hintTxt">
+      On a widget: <b>drag button</b> in the body moves it · near the right edge resizes width · <b>double-click</b> with the drag button toggles always-on-top · <b>delete button</b> removes it.
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+let usage = null, settings = null, widgets = [];
+
+const colorFor = p => p >= 90 ? 'linear-gradient(90deg,#f87171,#ef4444)' : p >= 70 ? 'linear-gradient(90deg,#fbbf24,#f59e0b)' : 'linear-gradient(90deg,#60a5fa,#3b82f6)';
+const pctColor = p => p >= 90 ? '#ef4444' : p >= 70 ? '#f59e0b' : '#e6edf3';
+
+function fmtReset(iso) {
+  if (!iso) return '';
+  const d = new Date(iso), ms = d - Date.now();
+  if (ms <= 0) return 'resetting…';
+  const h = ms / 36e5;
+  if (h < 24) {
+    const H = Math.floor(h), M = Math.round((h - H) * 60);
+    return 'resets in ' + (H ? H + ' hr ' + M + ' min' : M + ' min');
+  }
+  return 'resets ' + d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function fmtAgo(t) {
+  const s = Math.round((Date.now() - t) / 1000);
+  if (s < 5) return 'just now';
+  if (s < 60) return s + 's ago';
+  const m = Math.round(s / 60);
+  return m < 60 ? m + ' min ago' : Math.round(m / 60) + ' hr ago';
+}
+
+function renderUsage() {
+  const dot = $('#statusDot');
+  dot.className = 'dot';
+  if (!usage) return;
+  if (usage.status === 'offline' || usage.status === 'error') dot.classList.add('stale');
+  if (usage.status === 'auth' || usage.status === 'nocreds') dot.classList.add('err');
+  $('#updatedTxt').textContent = usage.fetchedAt ? '· updated ' + fmtAgo(usage.fetchedAt) : '';
+
+  const box = $('#limits');
+  if (usage.status === 'nocreds') {
+    box.innerHTML = '<div class="bigErr">Couldn\'t find Claude Code credentials.<br>Sign in with <b>claude</b> in a terminal first, then hit refresh.</div>';
+    return;
+  }
+  if (usage.status === 'auth' && !usage.limits.length) {
+    box.innerHTML = '<div class="bigErr">Token expired. Open Claude Code once<br>(it refreshes the token), then hit refresh.</div>';
+    return;
+  }
+  if (!usage.limits.length) {
+    box.innerHTML = '<div class="bigErr">No data yet…</div>';
+    return;
+  }
+  box.innerHTML = usage.limits.map(l => `
+    <div class="limitRow">
+      <div class="limitTop">
+        <span class="name">${l.label}</span>
+        <span class="reset">${fmtReset(l.resets_at)}</span>
+        <span class="spacer"></span>
+        <span class="pct" style="color:${pctColor(l.percent)}">${l.percent}%</span>
+      </div>
+      <div class="track"><div class="fill" style="width:${Math.min(100, l.percent)}%;background:${colorFor(l.percent)}"></div></div>
+      <div class="limitFoot"><span class="spacer"></span><button class="pinBtn" data-kind="${l.kind}">📌 pin as widget</button></div>
+    </div>`).join('');
+  box.querySelectorAll('.pinBtn').forEach(b => {
+    b.onclick = async () => { widgets = await window.pulse.pinWidget(b.dataset.kind); renderWidgets(); };
+  });
+  $('#extra').innerHTML = usage.extra
+    ? `<div class="extraLine">Extra usage credits: <b>${usage.extra.utilization}%</b> used${usage.extra.reason === 'out_of_credits' ? ' — out of credits' : ''}</div>`
+    : '';
+  if (usage.status === 'offline') $('#updatedTxt').textContent += ' · ⚠ offline, showing last known';
+  if (usage.status === 'auth') $('#updatedTxt').textContent += ' · ⚠ token expired';
+}
+
+function renderWidgets() {
+  const box = $('#widgetList');
+  if (!widgets.length) { box.innerHTML = '<div class="noW">none yet — pin a bar above and it floats on your desktop</div>'; return; }
+  const nameOf = k => { const l = usage && usage.limits.find(x => x.kind === k); return l ? l.label : k; };
+  box.innerHTML = widgets.map(w => `
+    <div class="wRow"><span>${nameOf(w.kind)}</span><span class="spacer"></span>
+      <label><input type="checkbox" data-id="${w.id}" class="topChk" ${w.top ? 'checked' : ''}> on top</label>
+      <button class="rm" data-id="${w.id}" title="remove">✕</button>
+    </div>`).join('');
+  box.querySelectorAll('.rm').forEach(b => { b.onclick = async () => { widgets = await window.pulse.widgetClose(b.dataset.id); renderWidgets(); }; });
+  box.querySelectorAll('.topChk').forEach(c => { c.onchange = () => window.pulse.widgetTop({ id: c.dataset.id, top: c.checked }); });
+}
+
+function renderSettings() {
+  $('#setPoll').value = settings.pollSeconds;
+  $('#setTop').checked = !!settings.defaultTop;
+  $('#setStartup').checked = !!settings.launchAtStartup;
+  $('#setBindDelete').value = String(settings.bindDelete);
+  $('#setBindDrag').value = String(settings.bindDrag);
+}
+
+function pushSettings() {
+  const bd = parseInt($('#setBindDelete').value), bg = parseInt($('#setBindDrag').value);
+  if (bd === bg) { alert('Delete and drag can\'t share the same button.'); renderSettings(); return; }
+  window.pulse.setSettings({
+    pollSeconds: Math.max(30, parseInt($('#setPoll').value) || 120),
+    defaultTop: $('#setTop').checked,
+    launchAtStartup: $('#setStartup').checked,
+    bindDelete: bd, bindDrag: bg
+  });
+}
+['#setPoll', '#setTop', '#setStartup', '#setBindDelete', '#setBindDrag'].forEach(s => { $(s).onchange = pushSettings; });
+
+$('#btnRefresh').onclick = () => window.pulse.refresh();
+$('#btnWeb').onclick = () => window.pulse.openUsagePage();
+$('#btnMin').onclick = () => window.pulse.dashMin();
+$('#btnClose').onclick = () => window.pulse.dashClose();
+
+window.pulse.onUsage(u => { usage = u; renderUsage(); renderWidgets(); });
+window.pulse.onWidgets(w => { widgets = w; renderWidgets(); });
+window.pulse.onSettings(s => { settings = s; renderSettings(); });
+setInterval(() => { if (usage && usage.fetchedAt) renderUsage(); }, 30000);
+
+(async () => {
+  const st = await window.pulse.getState();
+  usage = st.usage; settings = st.settings; widgets = st.widgets;
+  renderUsage(); renderWidgets(); renderSettings();
+})();
+</script>
+</body>
+</html>

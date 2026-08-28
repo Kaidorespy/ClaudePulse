@@ -1,0 +1,12 @@
+{
+  "name": "claude-pulse",
+  "version": "1.0.0",
+  "description": "Desktop widget for monitoring Claude Code usage levels",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^43.4.1"
+  }
+}

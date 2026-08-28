@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: transparent; overflow: hidden; height: 100%; }
+  body { font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, sans-serif; user-select: none; }
+  #pill {
+    position: absolute; inset: 3px;
+    display: flex; align-items: center; gap: 10px; padding: 0 14px;
+    background: rgba(13, 18, 26, .62);
+    border: 1px solid rgba(255,255,255,.10);
+    border-radius: 20px;
+    backdrop-filter: blur(9px);
+    cursor: default;
+  }
+  #pill:hover { background: rgba(13, 18, 26, .78); border-color: rgba(255,255,255,.18); }
+  #label {
+    font-size: 10.5px; font-weight: 600; letter-spacing: 1.2px; text-transform: uppercase;
+    color: rgba(230, 237, 243, .8); white-space: nowrap; max-width: 46%;
+    overflow: hidden; text-overflow: ellipsis;
+  }
+  #track { flex: 1; height: 6px; border-radius: 3px; background: rgba(255,255,255,.14); overflow: hidden; min-width: 30px; }
+  #fill { height: 100%; border-radius: 3px; width: 0%; transition: width .7s cubic-bezier(.22,1,.36,1); background: #3b82f6; }
+  #pct { font-size: 13px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  #grip {
+    position: absolute; right: 3px; top: 3px; bottom: 3px; width: 14px;
+    border-radius: 0 20px 20px 0; display: flex; align-items: center; justify-content: center;
+    color: transparent; font-size: 9px;
+  }
+  #pill:hover #grip { color: rgba(255,255,255,.4); }
+  #pill.top { border-color: rgba(96,165,250,.5); }
+</style>
+</head>
+<body>
+<div id="pill">
+  <span id="label">…</span>
+  <div id="track"><div id="fill"></div></div>
+  <span id="pct">–%</span>
+  <div id="grip">⋮</div>
+</div>
+<script>
+const $ = s => document.querySelector(s);
+const id = window.pulse.widgetId;
+let cfg = null, usage = null, settings = null;
+let hoverTimer = null;
+
+const colorFor = p => p >= 90 ? '#ef4444' : p >= 70 ? '#f59e0b' : '#3b82f6';
+
+function myLimit() {
+  return usage && usage.limits ? usage.limits.find(l => l.kind === (cfg && cfg.kind)) : null;
+}
+
+function fmtReset(iso) {
+  if (!iso) return '';
+  const d = new Date(iso), ms = d - Date.now();
+  if (ms <= 0) return 'resetting…';
+  const h = ms / 36e5;
+  if (h < 24) { const H = Math.floor(h), M = Math.round((h - H) * 60); return H ? `${H}h ${M}m left` : `${M}m left`; }
+  return 'resets ' + d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+function render(showReset) {
+  const l = myLimit();
+  if (!l) { $('#label').textContent = 'no data'; return; }
+  $('#label').textContent = showReset ? fmtReset(l.resets_at) : l.label;
+  $('#pct').textContent = l.percent + '%';
+  $('#fill').style.width = Math.min(100, l.percent) + '%';
+  $('#fill').style.background = colorFor(l.percent);
+  $('#pct').style.color = l.percent >= 90 ? '#f87171' : '#fff';
+  $('#pill').classList.toggle('top', !!(cfg && cfg.top));
+}
+
+/* hover → show countdown */
+$('#pill').addEventListener('mouseenter', () => { render(true); });
+$('#pill').addEventListener('mouseleave', () => { render(false); });
+
+/* interactions */
+let drag = null;
+document.addEventListener('contextmenu', e => e.preventDefault());
+document.addEventListener('pointerdown', async e => {
+  if (!settings) return;
+  if (e.button === settings.bindDelete) {
+    e.preventDefault();
+    window.pulse.widgetClose(id);
+    return;
+  }
+  if (e.button === settings.bindDrag) {
+    e.preventDefault();
+    const b = await window.pulse.widgetBoundsGet(id);
+    if (!b) return;
+    const mode = (window.innerWidth - e.clientX) < 18 ? 'resize' : 'move';
+    drag = { sx: e.screenX, sy: e.screenY, b, mode };
+    document.body.setPointerCapture && e.target.setPointerCapture(e.pointerId);
+  }
+});
+document.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const dx = e.screenX - drag.sx, dy = e.screenY - drag.sy;
+  if (drag.mode === 'move') window.pulse.widgetBoundsSet({ id, x: drag.b.x + dx, y: drag.b.y + dy });
+  else window.pulse.widgetBoundsSet({ id, w: drag.b.width + dx });
+});
+document.addEventListener('pointerup', e => {
+  if (drag) { drag = null; window.pulse.widgetDragEnd(id); }
+});
+/* double-click with drag button toggles always-on-top */
+let lastDragClick = 0;
+document.addEventListener('pointerdown', e => {
+  if (!settings || e.button !== settings.bindDrag) return;
+  const now = Date.now();
+  if (now - lastDragClick < 350) {
+    cfg.top = !cfg.top;
+    window.pulse.widgetTop({ id, top: cfg.top });
+    render(false);
+  }
+  lastDragClick = now;
+});
+/* block middle-click autoscroll */
+document.addEventListener('auxclick', e => e.preventDefault());
+
+window.pulse.onUsage(u => { usage = u; render(false); });
+window.pulse.onSettings(s => { settings = s; });
+window.pulse.onWidgets(ws => { const w = ws.find(x => x.id === id); if (w) { cfg = w; render(false); } });
+
+(async () => {
+  const r = await window.pulse.widgetConfig(id);
+  cfg = r.widget; settings = r.settings; usage = r.usage;
+  render(false);
+  setInterval(() => render(false), 60000);
+})();
+</script>
+</body>
+</html>
