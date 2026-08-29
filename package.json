@@ -4,9 +4,11 @@
   "description": "Desktop widget for monitoring Claude Code usage levels",
   "main": "main.js",
   "scripts": {
-    "start": "electron ."
+    "start": "electron .",
+    "pack": "electron-packager . ClaudePulse --platform win32 --arch x64 --out dist --overwrite --ignore \"^/dist$\" --ignore \"^/data$\" --ignore \"^/test-pulse\\.js$\""
   },
   "devDependencies": {
+    "@electron/packager": "^20.3.0",
     "electron": "^43.4.1"
   }
 }
