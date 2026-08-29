@@ -29,4 +29,4 @@ jobs:
         shell: pwsh
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-        run: .\butler\butler.exe push "dist\ClaudePulse-win32-x64" formslip/claudepulse:windows --userversion "1.0.${{ github.run_number }}"
+        run: .\butler\butler.exe push "dist\ClaudePulse-win32-x64" formslip/claude-pulse:windows --userversion "1.0.${{ github.run_number }}"
