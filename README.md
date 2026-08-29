@@ -10,9 +10,11 @@ Desktop widgets for your Claude usage limits. Pin any limit (session, weekly) as
 
 ## Requirements
 
-- Windows
-- [Node.js](https://nodejs.org) 18+
-- [Claude Code](https://claude.com/claude-code) signed in at least once — ClaudePulse reads the local OAuth token Claude Code already saved (`~/.claude/.credentials.json`, read-only) and uses it to ask Anthropic for your usage numbers. Nothing else is done with it.
+- Windows, macOS, or Linux (prebuilt downloads on [itch.io](https://formslip.itch.io/claude-pulse))
+- [Node.js](https://nodejs.org) 18+ (only if running from source)
+- [Claude Code](https://claude.com/claude-code) signed in at least once — ClaudePulse reads the local OAuth token Claude Code already saved (`~/.claude/.credentials.json`, or the Keychain on macOS, read-only) and uses it to ask Anthropic for your usage numbers. Nothing else is done with it.
+
+macOS note: the app is unsigned. If macOS blocks it, right-click → Open, or allow it under System Settings → Privacy & Security. Downloads through the [itch app](https://itch.io/app) avoid this entirely.
 
 ## Quick start
 

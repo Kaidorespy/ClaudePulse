@@ -54,9 +54,17 @@ function readToken() {
   try {
     const c = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8'));
     return c.claudeAiOauth && c.claudeAiOauth.accessToken || null;
-  } catch (e) {
-    return null;
+  } catch (e) {}
+  if (process.platform === 'darwin') {
+    // macOS Claude Code keeps credentials in the Keychain, not the file
+    try {
+      const out = require('child_process').execFileSync('security',
+        ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { encoding: 'utf8' });
+      const c = JSON.parse(out.trim());
+      return c.claudeAiOauth && c.claudeAiOauth.accessToken || null;
+    } catch (e) {}
   }
+  return null;
 }
 
 function fallbackLimits(d) {

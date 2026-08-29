@@ -7,26 +7,56 @@ on:
 
 jobs:
   publish:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: win32
+            arch: x64
+            channel: windows
+            butler_dl: windows-amd64
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            channel: linux
+            butler_dl: linux-amd64
+          - os: macos-latest
+            platform: darwin
+            arch: universal
+            channel: mac
+            butler_dl: darwin-amd64
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
 
       - run: npm ci
 
-      - run: npm run pack
+      - shell: bash
+        run: npx electron-packager . ClaudePulse --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --out dist --overwrite --ignore "^/dist$" --ignore "^/data$" --ignore "^/test-pulse\.js$"
 
-      - name: Download butler
+      - name: Download butler (windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           Invoke-WebRequest -Uri "https://broth.itch.zone/butler/windows-amd64/LATEST/archive/default" -OutFile butler.zip
           Expand-Archive butler.zip -DestinationPath butler
 
+      - name: Download butler (mac/linux)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          curl -L -o butler.zip "https://broth.itch.zone/butler/${{ matrix.butler_dl }}/LATEST/archive/default"
+          unzip -q butler.zip -d butler
+          chmod +x butler/butler
+          ./butler/butler -V
+
       - name: Push build to itch.io
-        shell: pwsh
+        shell: bash
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-        run: .\butler\butler.exe push "dist\ClaudePulse-win32-x64" formslip/claude-pulse:windows --userversion "1.0.${{ github.run_number }}"
+        run: ./butler/butler${{ runner.os == 'Windows' && '.exe' || '' }} push "dist/ClaudePulse-${{ matrix.platform }}-${{ matrix.arch }}" formslip/claude-pulse:${{ matrix.channel }} --userversion "1.0.${{ github.run_number }}"
