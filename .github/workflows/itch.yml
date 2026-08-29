@@ -37,7 +37,7 @@ jobs:
       - run: npm ci
 
       - shell: bash
-        run: npx electron-packager . ClaudePulse --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --out dist --overwrite --ignore "^/dist$" --ignore "^/data$" --ignore "^/test-pulse\.js$"
+        run: npx electron-packager . ClaudePulse --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --icon claudepulse --out dist --overwrite --ignore "^/dist$" --ignore "^/data$" --ignore "^/test-pulse\.js$"
 
       - name: Download butler (windows)
         if: runner.os == 'Windows'
