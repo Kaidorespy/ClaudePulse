@@ -1,14 +1,13 @@
 {
-  "name": "claude-pulse",
-  "version": "1.0.0",
-  "description": "Desktop widget for monitoring Claude Code usage levels",
+  "name": "pulse",
+  "version": "2.0.0",
+  "description": "Desktop widgets for Claude and Codex usage",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
-    "pack": "electron-packager . ClaudePulse --platform win32 --arch x64 --icon claudepulse --out dist --overwrite --ignore \"^/dist$\" --ignore \"^/data$\" --ignore \"^/test-pulse\\.js$\""
+    "test": "node --test pulse.test.js"
   },
   "devDependencies": {
-    "@electron/packager": "^20.3.0",
     "electron": "^43.4.1"
   }
 }

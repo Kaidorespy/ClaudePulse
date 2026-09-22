@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('pulse', {
   widgetId: widgetArg ? widgetArg.split('=')[1] : null,
   getState: () => ipcRenderer.invoke('get-state'),
   refresh: () => ipcRenderer.invoke('refresh'),
-  openUsagePage: () => ipcRenderer.invoke('open-usage-page'),
+  openUsagePage: (provider) => ipcRenderer.invoke('open-usage-page', provider),
   setSettings: (s) => ipcRenderer.invoke('set-settings', s),
   pinWidget: (kind) => ipcRenderer.invoke('pin-widget', kind),
   widgetConfig: (id) => ipcRenderer.invoke('widget-config', id),

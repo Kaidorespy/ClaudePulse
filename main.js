@@ -3,9 +3,13 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const DATA_DIR = app.getPath('userData');
+const { readRateLimits, normalizeCodex } = require('./codex-usage');
+const Percent = require('./percent');
+app.setName('Pulse');
+// Keep the existing profile and single-instance lock when upgrading.
+app.setPath('userData', process.env.PULSE_PROFILE_DIR || path.join(app.getPath('appData'), 'claude-pulse'));
+const DATA_DIR = process.env.PULSE_DATA_DIR || path.join(__dirname, 'data');
 const DATA_FILE = path.join(DATA_DIR, 'pulse.json');
-const OLD_DATA_FILE = path.join(__dirname, 'data', 'pulse.json');
 const CREDS_FILE = path.join(os.homedir(), '.claude', '.credentials.json');
 const USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
 const WIDGET_H = 46;
@@ -15,26 +19,27 @@ let dash = null;
 let tray = null;
 let quitting = false;
 let pollTimer = null;
+let topTimer = null;
+let fetching = null;
 const widgetWins = new Map();
 
 function defaults() {
   return {
-    settings: { pollSeconds: 120, bindDelete: 1, bindDrag: 2, defaultTop: true, launchAtStartup: false },
+    settings: { pollSeconds: 120, bindDelete: 1, bindDrag: 2, defaultTop: true, launchAtStartup: false, percentMode: 'original' },
     widgets: [],
     lastUsage: null,
+    codexUsage: null,
     prevPercents: {}
   };
 }
 
 function loadState() {
-  const tryRead = f => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { return null; } };
-  let j = tryRead(DATA_FILE);
-  if (!j) {
-    // keep a copy of a corrupt file instead of silently resetting everything
-    try { if (fs.existsSync(DATA_FILE)) fs.copyFileSync(DATA_FILE, DATA_FILE + '.bad'); } catch (e) {}
-    j = tryRead(OLD_DATA_FILE); // migrate from pre-1.1 location inside the app folder
+  try {
+    const j = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+    return { ...defaults(), ...j, settings: { ...defaults().settings, ...j.settings } };
+  } catch (e) {
+    return defaults();
   }
-  return Object.assign(defaults(), j || {});
 }
 
 function saveState() {
@@ -54,17 +59,9 @@ function readToken() {
   try {
     const c = JSON.parse(fs.readFileSync(CREDS_FILE, 'utf8'));
     return c.claudeAiOauth && c.claudeAiOauth.accessToken || null;
-  } catch (e) {}
-  if (process.platform === 'darwin') {
-    // macOS Claude Code keeps credentials in the Keychain, not the file
-    try {
-      const out = require('child_process').execFileSync('security',
-        ['find-generic-password', '-s', 'Claude Code-credentials', '-w'], { encoding: 'utf8' });
-      const c = JSON.parse(out.trim());
-      return c.claudeAiOauth && c.claudeAiOauth.accessToken || null;
-    } catch (e) {}
+  } catch (e) {
+    return null;
   }
-  return null;
 }
 
 function fallbackLimits(d) {
@@ -82,20 +79,21 @@ function labelFor(l) {
   return l.kind;
 }
 
-async function fetchUsage() {
+async function fetchClaudeUsage() {
   const token = readToken();
   if (!token) {
-    broadcast('usage', { status: 'nocreds', fetchedAt: Date.now(), limits: [] });
+    publishClaude( { status: 'nocreds', fetchedAt: Date.now(), limits: [] });
     return;
   }
   try {
     const res = await fetch(USAGE_URL, {
+      signal: AbortSignal.timeout(20000),
       headers: { 'Authorization': 'Bearer ' + token, 'anthropic-beta': 'oauth-2025-04-20' }
     });
     if (!res.ok) {
       const status = res.status === 401 || res.status === 403 ? 'auth' : 'error';
       const stale = state.lastUsage ? { ...state.lastUsage, status, httpStatus: res.status } : { status, httpStatus: res.status, fetchedAt: Date.now(), limits: [] };
-      broadcast('usage', stale);
+      publishClaude( stale);
       return;
     }
     const d = await res.json();
@@ -113,12 +111,41 @@ async function fetchUsage() {
     notifyThresholds(usage);
     state.lastUsage = usage;
     saveState();
-    broadcast('usage', usage);
-    updateTray(usage);
+    publishClaude( usage);
+
   } catch (e) {
     const stale = state.lastUsage ? { ...state.lastUsage, status: 'offline' } : { status: 'offline', fetchedAt: Date.now(), limits: [] };
-    broadcast('usage', stale);
+    publishClaude( stale);
   }
+}
+
+function combinedUsage() {
+  const claude = state.lastUsage || { status: 'loading', limits: [] };
+  const codex = state.codexUsage || { status: 'loading', limits: [] };
+  return { status: 'ok', fetchedAt: Math.max(claude.fetchedAt || 0, codex.fetchedAt || 0),
+    providers: { claude, codex }, extra: claude.extra,
+    limits: [...claude.limits.map(l => ({ ...l, provider: 'claude' })), ...codex.limits] };
+}
+function publish() {
+  const usage = combinedUsage();
+  broadcast('usage', usage);
+  updateTray(usage);
+}
+function publishClaude(usage) { state.lastUsage = usage; saveState(); publish(); }
+async function fetchCodexUsage() {
+  try {
+    const usage = normalizeCodex(await readRateLimits());
+    notifyThresholds(usage);
+    state.codexUsage = usage;
+  } catch (e) {
+    const status = e.code === 'ENOENT' ? 'nocreds' : /auth|sign|log.?in|token|401/i.test(e.message) ? 'auth' : 'offline';
+    state.codexUsage = { ...(state.codexUsage || { limits: [] }), status };
+  }
+  saveState(); publish();
+}
+function fetchUsage() {
+  if (!fetching) fetching = Promise.allSettled([fetchClaudeUsage(), fetchCodexUsage()]).finally(() => { fetching = null; });
+  return fetching;
 }
 
 function notifyThresholds(usage) {
@@ -127,8 +154,8 @@ function notifyThresholds(usage) {
     for (const t of [75, 90, 100]) {
       if (prev < t && l.percent >= t) {
         new Notification({
-          title: 'ClaudePulse',
-          body: `${l.label} hit ${l.percent}%` + (l.resets_at ? ` — resets ${new Date(l.resets_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : '')
+          title: 'Pulse',
+          body: `${l.provider === 'codex' ? 'Codex \u00b7 ' : 'Claude \u00b7 '}${l.label} ${Percent.notice(l, state.settings.percentMode)}` + (l.resets_at ? ` — resets ${new Date(l.resets_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })}` : '')
         }).show();
         break;
       }
@@ -139,8 +166,8 @@ function notifyThresholds(usage) {
 
 function updateTray(usage) {
   if (!tray) return;
-  const parts = usage.limits.map(l => `${l.label}: ${l.percent}%`);
-  tray.setToolTip('ClaudePulse\n' + (parts.join('\n') || 'no data'));
+  const parts = usage.limits.map(l => `${l.provider === 'codex' ? 'Codex' : 'Claude'} ${l.label}: ${Percent.text(l, state.settings.percentMode)}`);
+  tray.setToolTip(('Pulse\n' + (parts.join('\n') || 'no data')).slice(0, 127));
 }
 
 function broadcast(ch, payload) {
@@ -174,60 +201,23 @@ function makeIcon() {
 }
 
 /* ---------- windows ---------- */
-// pull a window back on-screen if its saved spot no longer exists
-// (monitor unplugged, resolution change) — widgets were vanishing this way
-function ensureVisible(b) {
-  for (const d of screen.getAllDisplays()) {
-    const wa = d.workArea;
-    const ix = Math.min(b.x + b.width, wa.x + wa.width) - Math.max(b.x, wa.x);
-    const iy = Math.min(b.y + b.height, wa.y + wa.height) - Math.max(b.y, wa.y);
-    if (ix >= Math.min(60, b.width) && iy >= 20) return { x: b.x, y: b.y };
-  }
-  const wa = screen.getPrimaryDisplay().workArea;
-  return {
-    x: Math.max(wa.x, Math.min(b.x, wa.x + wa.width - b.width)),
-    y: Math.max(wa.y, Math.min(b.y, wa.y + wa.height - b.height))
-  };
-}
-
-function reclampAll() {
-  for (const w of state.widgets) {
-    const win = widgetWins.get(w.id);
-    if (!win || win.isDestroyed()) continue;
-    const width = Math.max(160, w.w || 320);
-    const pos = ensureVisible({ x: w.x, y: w.y, width, height: WIDGET_H });
-    win.setBounds({ x: pos.x, y: pos.y, width, height: WIDGET_H });
-    if (w.top) win.setAlwaysOnTop(true, 'screen-saver');
-    if (!win.isVisible()) win.showInactive();
-  }
-}
-
-let reclampTimer = null;
-function scheduleReclamp() {
-  clearTimeout(reclampTimer);
-  reclampTimer = setTimeout(reclampAll, 1000);
-}
-
 function createDash() {
-  const wa = screen.getPrimaryDisplay().workArea;
   dash = new BrowserWindow({
-    width: 460, height: Math.min(880, wa.height - 40), minWidth: 380, minHeight: 420,
+    width: 560, height: 820, minWidth: 460, minHeight: 420,
     frame: false, backgroundColor: '#0b0f14', icon: makeIcon(),
-    title: 'ClaudePulse',
+    title: 'Pulse',
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false }
   });
   dash.setMenuBarVisibility(false);
   dash.loadFile('dashboard.html');
   dash.on('close', e => { if (!quitting) { e.preventDefault(); dash.hide(); } });
-  dash.webContents.on('render-process-gone', () => { if (dash && !dash.isDestroyed()) dash.reload(); });
 }
 
 function createWidget(w) {
-  const width = Math.max(160, w.w || 320);
-  const pos = ensureVisible({ x: w.x, y: w.y, width, height: WIDGET_H });
   const win = new BrowserWindow({
-    x: pos.x, y: pos.y, width, height: WIDGET_H,
+    x: w.x, y: w.y, width: Math.max(160, w.w || 320), height: WIDGET_H,
     frame: false, transparent: true, resizable: false, skipTaskbar: true,
+    show: false, focusable: false,
     alwaysOnTop: !!w.top, hasShadow: false, minimizable: false, maximizable: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false,
@@ -235,13 +225,24 @@ function createWidget(w) {
     }
   });
   win.setMenuBarVisibility(false);
-  if (w.top) win.setAlwaysOnTop(true, 'screen-saver');
+  win.once('ready-to-show', () => { win.showInactive(); enforceTop(win, w); });
+  win.on('show', () => enforceTop(win, w));
   win.loadFile('widget.html');
-  // a crashed renderer leaves a transparent window invisible — reload instead
-  win.webContents.on('render-process-gone', () => { if (!win.isDestroyed()) win.reload(); });
   win.on('closed', () => widgetWins.delete(w.id));
   widgetWins.set(w.id, win);
   return win;
+}
+
+function enforceTop(win, config) {
+  if (win.isDestroyed() || !config.top || !win.isVisible()) return;
+  win.setAlwaysOnTop(true, 'screen-saver');
+  win.moveTop(); // Restore z-order without activating the widget or stealing focus.
+}
+function restorePinnedWidgets() {
+  for (const w of state.widgets) {
+    const win = widgetWins.get(w.id);
+    if (win) enforceTop(win, w);
+  }
 }
 
 function showDash() {
@@ -264,7 +265,7 @@ if (!gotLock) {
     if (process.argv.includes('--tray')) dash.hide();
     for (const w of state.widgets) createWidget(w);
     tray = new Tray(makeIcon());
-    tray.setToolTip('ClaudePulse');
+    tray.setToolTip('Pulse');
     tray.setContextMenu(Menu.buildFromTemplate([
       { label: 'Dashboard', click: showDash },
       { label: 'Refresh now', click: fetchUsage },
@@ -272,27 +273,28 @@ if (!gotLock) {
       { label: 'Quit', click: () => { quitting = true; app.quit(); } }
     ]));
     tray.on('click', showDash);
-    screen.on('display-added', scheduleReclamp);
-    screen.on('display-removed', scheduleReclamp);
-    screen.on('display-metrics-changed', scheduleReclamp);
-    powerMonitor.on('resume', scheduleReclamp);
-    powerMonitor.on('unlock-screen', scheduleReclamp);
     startPolling();
+    topTimer = setInterval(restorePinnedWidgets, 5000);
+    powerMonitor.on('resume', () => { restorePinnedWidgets(); fetchUsage(); });
+    powerMonitor.on('unlock-screen', restorePinnedWidgets);
+    screen.on('display-metrics-changed', restorePinnedWidgets);
   });
 }
 app.on('window-all-closed', e => e.preventDefault());
-app.on('before-quit', () => { quitting = true; saveState(); });
+app.on('before-quit', () => { quitting = true; clearInterval(pollTimer); clearInterval(topTimer); if (state) saveState(); });
 
 /* ---------- IPC ---------- */
-ipcMain.handle('get-state', () => ({ usage: state.lastUsage, settings: state.settings, widgets: state.widgets }));
+ipcMain.handle('get-state', () => ({ usage: combinedUsage(), settings: state.settings, widgets: state.widgets }));
 ipcMain.handle('refresh', () => fetchUsage());
-ipcMain.handle('open-usage-page', () => shell.openExternal('https://claude.ai/settings/usage'));
+ipcMain.handle('open-usage-page', (e, provider) => shell.openExternal(provider === 'codex' ? 'https://chatgpt.com/codex/settings/usage' : 'https://claude.ai/settings/usage'));
 
 ipcMain.handle('set-settings', (e, s) => {
   const oldPoll = state.settings.pollSeconds;
   Object.assign(state.settings, s);
+  state.settings.percentMode = Percent.normalize(state.settings.percentMode);
   saveState();
   if (s.pollSeconds && s.pollSeconds !== oldPoll) startPolling();
+  if ('percentMode' in s) updateTray(combinedUsage());
   if ('launchAtStartup' in s) {
     try {
       app.setLoginItemSettings({ openAtLogin: !!s.launchAtStartup, path: process.execPath, args: [path.resolve(__dirname), '--tray'] });
@@ -319,7 +321,7 @@ ipcMain.handle('pin-widget', (e, kind) => {
 
 ipcMain.handle('widget-config', (e, id) => {
   const w = state.widgets.find(x => x.id === id);
-  return { widget: w, settings: state.settings, usage: state.lastUsage };
+  return { widget: w, settings: state.settings, usage: combinedUsage() };
 });
 
 ipcMain.handle('widget-close', (e, id) => {
@@ -353,10 +355,7 @@ ipcMain.handle('widget-drag-end', (e, id) => {
   const w = state.widgets.find(x => x.id === id);
   if (win && !win.isDestroyed() && w) {
     const b = win.getBounds();
-    // don't let a drag save a fully off-screen position
-    const pos = ensureVisible(b);
-    if (pos.x !== b.x || pos.y !== b.y) win.setBounds({ x: pos.x, y: pos.y, width: b.width, height: WIDGET_H });
-    w.x = pos.x; w.y = pos.y; w.w = b.width;
+    w.x = b.x; w.y = b.y; w.w = b.width;
     saveState();
   }
 });
@@ -365,7 +364,7 @@ ipcMain.handle('widget-top', (e, { id, top }) => {
   const w = state.widgets.find(x => x.id === id);
   const win = widgetWins.get(id);
   if (w) { w.top = !!top; saveState(); }
-  if (win && !win.isDestroyed()) win.setAlwaysOnTop(!!top, 'screen-saver');
+  if (win && !win.isDestroyed()) { win.setAlwaysOnTop(!!top, 'screen-saver'); if (top) enforceTop(win, w); }
   broadcast('widgets', state.widgets);
   return !!top;
 });

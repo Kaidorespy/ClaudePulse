@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>ClaudePulse</title>
+<title>Pulse</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; }
@@ -30,7 +30,7 @@
   #scroll::-webkit-scrollbar { width: 8px; }
   #scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
 
-  .statusLine { display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8b949e; margin: 4px 0 14px; }
+  .statusLine { flex-wrap: wrap; display: flex; align-items: center; gap: 10px; font-size: 12px; color: #8b949e; margin: 4px 0 14px; }
   .statusLine .spacer { flex: 1; }
   .iconBtn {
     background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: #c9d1d9;
@@ -47,11 +47,13 @@
 
   .limitRow { margin: 14px 0; }
   .limitRow:first-of-type { margin-top: 2px; }
-  .limitTop { display: flex; align-items: baseline; gap: 10px; margin-bottom: 7px; }
+  .limitTop { display: grid; grid-template-columns: 1fr auto; align-items: baseline; gap: 4px 10px; margin-bottom: 7px; }
   .limitTop .name { font-size: 14px; font-weight: 600; }
-  .limitTop .reset { font-size: 11.5px; color: #8b949e; }
+  .limitTop .spacer { display: none; }
+  .limitTop .pct { grid-column: 2; grid-row: 1; }
+  .limitTop .reset { grid-column: 1 / -1; grid-row: 2; font-size: 11.5px; color: #8b949e; }
   .limitTop .spacer { flex: 1; }
-  .limitTop .pct { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .limitTop .pct { font-size: 17px; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; }
   .track { height: 8px; border-radius: 4px; background: rgba(255,255,255,.09); overflow: hidden; }
   .fill { height: 100%; border-radius: 4px; transition: width .7s cubic-bezier(.22,1,.36,1); }
   .limitFoot { display: flex; margin-top: 7px; }
@@ -87,7 +89,7 @@
 </head>
 <body>
 <div id="titlebar">
-  <div class="logo"><span class="dot" id="statusDot"></span> ClaudePulse</div>
+  <div class="logo"><span class="dot" id="statusDot"></span> Pulse</div>
   <span class="spacer"></span>
   <button class="winBtn" id="btnMin">─</button>
   <button class="winBtn" id="btnClose">✕</button>
@@ -98,10 +100,10 @@
     <span id="updatedTxt"></span>
     <span class="spacer"></span>
     <button class="iconBtn" id="btnRefresh">↻ refresh</button>
-    <button class="iconBtn" id="btnWeb" title="open claude.ai usage page">claude.ai ↗</button>
+    <button class="iconBtn" id="btnCodex">Codex &#8599;</button><button class="iconBtn" id="btnWeb" title="open claude.ai usage page">claude.ai ↗</button>
   </div>
 
-  <div class="card"><h3>Usage limits</h3><div id="limits"></div><div id="extra"></div></div>
+  <div class="card"><h3>Claude + Codex limits</h3><div id="providerStatus" class="hintTxt"></div><div id="limits"></div><div id="extra"></div></div>
 
   <div class="card"><h3>Pinned widgets</h3><div id="widgetList"></div></div>
 
@@ -109,6 +111,14 @@
     <div class="setRow"><span>Poll every</span><input type="number" id="setPoll" min="30" step="30"><span>seconds</span></div>
     <div class="setRow"><span>New widgets always-on-top</span><span class="spacer"></span><input type="checkbox" id="setTop"></div>
     <div class="setRow"><span>Launch with Windows (to tray)</span><span class="spacer"></span><input type="checkbox" id="setStartup"></div>
+    <div class="setRow"><span>Percent display</span><span class="spacer"></span>
+      <select id="setPercent" title="Claude's /status reports % used; Codex's reports % left. Pick how every bar should read.">
+        <option value="original">Original · Claude % used, Codex % left</option>
+        <option value="used">% used everywhere</option>
+        <option value="left">% left everywhere</option>
+        <option value="both">Both · % used and % left</option>
+      </select>
+    </div>
     <div class="setRow"><span>Widget · delete button</span><span class="spacer"></span>
       <select id="setBindDelete"><option value="0">left click</option><option value="1">middle click</option><option value="2">right click</option></select>
     </div>
@@ -116,16 +126,19 @@
       <select id="setBindDrag"><option value="0">left drag</option><option value="1">middle drag</option><option value="2">right drag</option></select>
     </div>
     <div class="hintTxt">
-      On a widget: <b>drag button</b> in the body moves it · near the right edge resizes width · <b>double-click</b> with the drag button toggles always-on-top · <b>delete button</b> removes it.
+      On a widget: <b>drag button</b> in the body moves it · near the right edge resizes width · use the <b>on top</b> checkbox above to change pinning · <b>delete button</b> removes it.
     </div>
   </div>
 </div>
 
+<script src="percent.js"></script>
 <script>
 const $ = s => document.querySelector(s);
 let usage = null, settings = null, widgets = [];
 
 const colorFor = p => p >= 90 ? 'linear-gradient(90deg,#f87171,#ef4444)' : p >= 70 ? 'linear-gradient(90deg,#fbbf24,#f59e0b)' : 'linear-gradient(90deg,#60a5fa,#3b82f6)';
+const esc = value => String(value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const mode = () => PulsePercent.normalize(settings && settings.percentMode);
 const pctColor = p => p >= 90 ? '#ef4444' : p >= 70 ? '#f59e0b' : '#e6edf3';
 
 function fmtReset(iso) {
@@ -134,7 +147,7 @@ function fmtReset(iso) {
   if (ms <= 0) return 'resetting…';
   const h = ms / 36e5;
   if (h < 24) {
-    const H = Math.floor(h), M = Math.round((h - H) * 60);
+    const total = Math.ceil(ms / 60000), H = Math.floor(total / 60), M = total % 60;
     return 'resets in ' + (H ? H + ' hr ' + M + ' min' : M + ' min');
   }
   return 'resets ' + d.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
@@ -157,28 +170,24 @@ function renderUsage() {
   $('#updatedTxt').textContent = usage.fetchedAt ? '· updated ' + fmtAgo(usage.fetchedAt) : '';
 
   const box = $('#limits');
-  if (usage.status === 'nocreds') {
-    box.innerHTML = '<div class="bigErr">Couldn\'t find Claude Code credentials.<br>Sign in with <b>claude</b> in a terminal first, then hit refresh.</div>';
-    return;
-  }
-  if (usage.status === 'auth' && !usage.limits.length) {
-    box.innerHTML = '<div class="bigErr">Token expired. Open Claude Code once<br>(it refreshes the token), then hit refresh.</div>';
-    return;
-  }
+  const messages = { loading: 'Loading...', ok: 'Live', nocreds: 'Sign in with the CLI, then refresh', auth: 'Open the CLI to renew sign-in, then refresh', offline: 'Offline / unavailable - showing last known values', error: 'Request failed - showing last known values' };
+  $('#providerStatus').textContent = Object.entries(usage.providers || {}).map(([name, u]) => `${name === 'codex' ? 'Codex' : 'Claude'}: ${messages[u.status] || u.status}`).join(' \u2022 ');
+  if (Object.values(usage.providers || {}).some(u => u.status !== 'ok')) dot.classList.add('stale');
   if (!usage.limits.length) {
-    box.innerHTML = '<div class="bigErr">No data yet…</div>';
+    box.textContent = 'No limits available yet.';
+    $('#extra').textContent = '';
     return;
   }
   box.innerHTML = usage.limits.map(l => `
     <div class="limitRow">
       <div class="limitTop">
-        <span class="name">${l.label}</span>
+        <span class="name">${l.provider === 'codex' ? 'Codex \u00b7 ' : 'Claude \u00b7 '}${esc(l.label)}</span>
         <span class="reset">${fmtReset(l.resets_at)}</span>
         <span class="spacer"></span>
-        <span class="pct" style="color:${pctColor(l.percent)}">${l.percent}%</span>
+        <span class="pct" style="color:${pctColor(l.percent)}">${PulsePercent.text(l, mode())}</span>
       </div>
-      <div class="track"><div class="fill" style="width:${Math.min(100, l.percent)}%;background:${colorFor(l.percent)}"></div></div>
-      <div class="limitFoot"><span class="spacer"></span><button class="pinBtn" data-kind="${l.kind}">📌 pin as widget</button></div>
+      <div class="track"><div class="fill" style="width:${PulsePercent.bar(l, mode())}%;background:${l.provider === 'codex' && l.percent < 70 ? 'linear-gradient(90deg,#5eead4,#14b8a6)' : colorFor(l.percent)}"></div></div>
+      <div class="limitFoot"><span class="spacer"></span><button class="pinBtn" data-kind="${esc(l.kind)}">📌 pin as widget</button></div>
     </div>`).join('');
   box.querySelectorAll('.pinBtn').forEach(b => {
     b.onclick = async () => { widgets = await window.pulse.pinWidget(b.dataset.kind); renderWidgets(); };
@@ -193,9 +202,9 @@ function renderUsage() {
 function renderWidgets() {
   const box = $('#widgetList');
   if (!widgets.length) { box.innerHTML = '<div class="noW">none yet — pin a bar above and it floats on your desktop</div>'; return; }
-  const nameOf = k => { const l = usage && usage.limits.find(x => x.kind === k); return l ? l.label : k; };
+  const nameOf = k => { const l = usage && usage.limits.find(x => x.kind === k); return l ? `${l.provider === 'codex' ? 'Codex' : 'Claude'} \u00b7 ${l.label}` : k; };
   box.innerHTML = widgets.map(w => `
-    <div class="wRow"><span>${nameOf(w.kind)}</span><span class="spacer"></span>
+    <div class="wRow"><span>${esc(nameOf(w.kind))}</span><span class="spacer"></span>
       <label><input type="checkbox" data-id="${w.id}" class="topChk" ${w.top ? 'checked' : ''}> on top</label>
       <button class="rm" data-id="${w.id}" title="remove">✕</button>
     </div>`).join('');
@@ -209,6 +218,7 @@ function renderSettings() {
   $('#setStartup').checked = !!settings.launchAtStartup;
   $('#setBindDelete').value = String(settings.bindDelete);
   $('#setBindDrag').value = String(settings.bindDrag);
+  $('#setPercent').value = PulsePercent.normalize(settings.percentMode);
 }
 
 function pushSettings() {
@@ -218,19 +228,21 @@ function pushSettings() {
     pollSeconds: Math.max(30, parseInt($('#setPoll').value) || 120),
     defaultTop: $('#setTop').checked,
     launchAtStartup: $('#setStartup').checked,
-    bindDelete: bd, bindDrag: bg
+    bindDelete: bd, bindDrag: bg,
+    percentMode: $('#setPercent').value
   });
 }
-['#setPoll', '#setTop', '#setStartup', '#setBindDelete', '#setBindDrag'].forEach(s => { $(s).onchange = pushSettings; });
+['#setPoll', '#setTop', '#setStartup', '#setBindDelete', '#setBindDrag', '#setPercent'].forEach(s => { $(s).onchange = pushSettings; });
 
 $('#btnRefresh').onclick = () => window.pulse.refresh();
+$('#btnCodex').onclick = () => window.pulse.openUsagePage('codex');
 $('#btnWeb').onclick = () => window.pulse.openUsagePage();
 $('#btnMin').onclick = () => window.pulse.dashMin();
 $('#btnClose').onclick = () => window.pulse.dashClose();
 
 window.pulse.onUsage(u => { usage = u; renderUsage(); renderWidgets(); });
 window.pulse.onWidgets(w => { widgets = w; renderWidgets(); });
-window.pulse.onSettings(s => { settings = s; renderSettings(); });
+window.pulse.onSettings(s => { settings = s; renderSettings(); if (usage) renderUsage(); });
 setInterval(() => { if (usage && usage.fetchedAt) renderUsage(); }, 30000);
 
 (async () => {

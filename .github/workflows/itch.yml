@@ -37,7 +37,7 @@ jobs:
       - run: npm ci
 
       - shell: bash
-        run: npx electron-packager . ClaudePulse --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --icon claudepulse --out dist --overwrite --ignore "^/dist$" --ignore "^/data$" --ignore "^/test-pulse\.js$"
+        run: npx electron-packager . ClaudePulse --platform ${{ matrix.platform }} --arch ${{ matrix.arch }} --icon claudepulse --out dist --overwrite --ignore "^/dist$" --ignore "^/data$" --ignore "^/backups$" --ignore "^/test-.*\.js$" --ignore "^/pulse\.test\.js$" --ignore "^/[0-9]+\.PNG$"
 
       - name: Download butler (windows)
         if: runner.os == 'Windows'
@@ -59,4 +59,4 @@ jobs:
         shell: bash
         env:
           BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
-        run: ./butler/butler${{ runner.os == 'Windows' && '.exe' || '' }} push "dist/ClaudePulse-${{ matrix.platform }}-${{ matrix.arch }}" formslip/claude-pulse:${{ matrix.channel }} --userversion "1.0.${{ github.run_number }}"
+        run: ./butler/butler${{ runner.os == 'Windows' && '.exe' || '' }} push "dist/ClaudePulse-${{ matrix.platform }}-${{ matrix.arch }}" formslip/claude-pulse:${{ matrix.channel }} --userversion "2.0.${{ github.run_number }}"
